@@ -18,7 +18,9 @@ from mcp.client.stdio import stdio_client
 
 # --- Configuration ---
 MODEL = "claude-sonnet-4-20250514"
-SYSTEM_PROMPT = """You are a software engineer assistant. You can write and execute Python code.
+
+# Method 1: ML-specialized system prompt (compare with SYSTEM_PROMPT_SWE)
+SYSTEM_PROMPT_SWE = """You are a software engineer assistant. You can write and execute Python code.
 
 Rules:
 - Be concise in your responses.
@@ -29,6 +31,29 @@ Rules:
 - Use web_search when you need current information you don't know.
 - Use read_file and list_directory to explore existing files.
 """
+
+SYSTEM_PROMPT_ML = """You are a machine learning engineer. You build, train, and evaluate ML models.
+
+Workflow — always follow this order:
+1. UNDERSTAND: Read the dataset and problem description. Ask clarifying questions if needed.
+2. EDA: Use read_csv_preview to inspect the data. Check shape, types, missing values, target distribution.
+3. BASELINE: Start with a simple model (e.g., logistic regression, decision tree) to establish a baseline score.
+4. ITERATE: Try improvements one at a time — feature engineering, different models, hyperparameter tuning.
+5. EVALUATE: Always report metrics (accuracy, F1, RMSE, etc.). Compare against baseline.
+6. SUMMARIZE: At the end, summarize what you tried, what worked, and the final result.
+
+Rules:
+- Be concise. Show key metrics, not walls of text.
+- Always split data into train/test BEFORE any modeling. Never leak test data.
+- Use execute_python to run code. Use edit_file to save scripts.
+- Use read_csv_preview to quickly inspect datasets before writing code.
+- If code errors, debug and retry (up to 3 times).
+- Track every experiment: model name, parameters, score.
+- Use web_search if you need info about a specific ML technique.
+- Use read_file and list_directory to explore existing files.
+"""
+
+SYSTEM_PROMPT = SYSTEM_PROMPT_ML  # <-- Toggle between SWE and ML
 
 # --- Local Tool Definitions (JSON schema for Claude) ---
 LOCAL_TOOLS = [
@@ -76,6 +101,20 @@ LOCAL_TOOLS = [
                 }
             },
             "required": ["query"]
+        }
+    },
+    {
+        "name": "read_csv_preview",
+        "description": "Load a CSV file and return a preview: shape, column types, missing values, basic stats, and first 5 rows. Use this to quickly understand a dataset before writing modeling code.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the CSV file."
+                }
+            },
+            "required": ["path"]
         }
     }
 ]
@@ -137,6 +176,23 @@ def web_search(query: str) -> str:
         return f"Search error: {e}"
 
 
+def read_csv_preview(path: str) -> str:
+    """Load a CSV and return a quick overview: shape, types, missing values, stats, head."""
+    try:
+        import pandas as pd
+        df = pd.read_csv(path)
+        parts = [
+            f"Shape: {df.shape[0]} rows x {df.shape[1]} columns",
+            f"\nColumn Types:\n{df.dtypes.to_string()}",
+            f"\nMissing Values:\n{df.isnull().sum().to_string()}",
+            f"\nBasic Stats:\n{df.describe().to_string()}",
+            f"\nFirst 5 Rows:\n{df.head().to_string()}",
+        ]
+        return "\n".join(parts)
+    except Exception as e:
+        return f"Error reading CSV: {e}"
+
+
 def run_local_tool(name: str, input_data: dict) -> str:
     """Dispatch a local tool call."""
     if name == "execute_python":
@@ -145,6 +201,8 @@ def run_local_tool(name: str, input_data: dict) -> str:
         return edit_file(input_data["path"], input_data["content"])
     elif name == "web_search":
         return web_search(input_data["query"])
+    elif name == "read_csv_preview":
+        return read_csv_preview(input_data["path"])
     return None
 
 
